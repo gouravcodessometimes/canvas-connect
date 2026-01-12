@@ -216,7 +216,7 @@ export const useStore = create<AppState>()(
       currentUserName: 'Guest',
 
       activeTool: 'select',
-      activeColor: '#10B981',
+      activeColor: '#3B82F6',
       strokeWidth: 3,
       fontSize: 16,
       activeShapeType: 'rectangle',
