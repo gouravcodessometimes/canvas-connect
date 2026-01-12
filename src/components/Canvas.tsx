@@ -8,7 +8,6 @@ interface DrawingLine {
   color: string;
   strokeWidth: number;
   opacity: number;
-  tool: 'pen' | 'highlighter' | 'eraser';
 }
 
 export const Canvas = () => {
@@ -20,7 +19,7 @@ export const Canvas = () => {
   const [currentLine, setCurrentLine] = useState<DrawingLine | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const [images, setImages] = useState<Map<string, HTMLImageElement>>(new Map());
+  const [loadedImages, setLoadedImages] = useState<Map<string, HTMLImageElement>>(new Map());
 
   const {
     activeTool,
@@ -44,19 +43,21 @@ export const Canvas = () => {
   const currentPage = getCurrentPage();
   const elements = currentPage?.canvasElements || [];
 
-  // Load images for image elements
+  // Load images
   useEffect(() => {
-    elements.forEach((element) => {
-      if (element.type === 'image' && element.props.imageUrl && !images.has(element.id)) {
+    elements.forEach((el) => {
+      if (el.type === 'image' && el.props.imageUrl && !loadedImages.has(el.id)) {
         const img = new window.Image();
-        img.src = element.props.imageUrl;
+        img.crossOrigin = 'anonymous';
+        img.src = el.props.imageUrl;
         img.onload = () => {
-          setImages((prev) => new Map(prev).set(element.id, img));
+          setLoadedImages((prev) => new Map(prev).set(el.id, img));
         };
       }
     });
-  }, [elements]);
+  }, [elements, loadedImages]);
 
+  // Resize handler
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
@@ -66,39 +67,37 @@ export const Canvas = () => {
         });
       }
     };
-
     updateDimensions();
     window.addEventListener('resize', updateDimensions);
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
-  // Update transformer when selection changes
+  // Transformer update
   useEffect(() => {
-    if (transformerRef.current && stageRef.current) {
-      const stage = stageRef.current;
-      if (selectedId) {
-        const selectedNode = stage.findOne('#' + selectedId);
-        if (selectedNode) {
-          transformerRef.current.nodes([selectedNode]);
-          transformerRef.current.getLayer()?.batchDraw();
-        }
-      } else {
-        transformerRef.current.nodes([]);
+    if (!transformerRef.current || !stageRef.current) return;
+    
+    if (selectedId && activeTool === 'select') {
+      const node = stageRef.current.findOne('#' + selectedId);
+      if (node) {
+        transformerRef.current.nodes([node]);
         transformerRef.current.getLayer()?.batchDraw();
       }
+    } else {
+      transformerRef.current.nodes([]);
+      transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [selectedId]);
+  }, [selectedId, activeTool]);
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingTextId) return;
       
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedId) {
-          deleteElement(selectedId);
-          setSelectedId(null);
-        }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        deleteElement(selectedId);
+        setSelectedId(null);
       }
+      
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -108,7 +107,6 @@ export const Canvas = () => {
         }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedId, deleteElement, editingTextId]);
@@ -118,26 +116,22 @@ export const Canvas = () => {
     const stage = stageRef.current;
     if (!stage) return;
 
-    const oldScale = zoom;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
 
     const mousePointTo = {
-      x: (pointer.x - panX) / oldScale,
-      y: (pointer.y - panY) / oldScale,
+      x: (pointer.x - panX) / zoom,
+      y: (pointer.y - panY) / zoom,
     };
 
     const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const newScale = Math.max(0.1, Math.min(5, oldScale + direction * 0.1));
+    const newZoom = Math.max(0.1, Math.min(5, zoom + direction * 0.1));
 
-    setZoom(newScale);
-    setPan(
-      pointer.x - mousePointTo.x * newScale,
-      pointer.y - mousePointTo.y * newScale
-    );
+    setZoom(newZoom);
+    setPan(pointer.x - mousePointTo.x * newZoom, pointer.y - mousePointTo.y * newZoom);
   }, [zoom, panX, panY, setZoom, setPan]);
 
-  const getCanvasPosition = (e: Konva.KonvaEventObject<MouseEvent>) => {
+  const getCanvasPos = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current;
     if (!stage) return { x: 0, y: 0 };
     const pointer = stage.getPointerPosition();
@@ -149,16 +143,20 @@ export const Canvas = () => {
   };
 
   const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const pos = getCanvasPosition(e);
-    const clickedOnEmpty = e.target === e.target.getStage();
+    const pos = getCanvasPos(e);
+    const stage = stageRef.current;
+    const target = e.target;
+    const clickedOnStage = target === stage;
 
-    if (clickedOnEmpty) {
+    // Deselect when clicking on empty canvas
+    if (clickedOnStage) {
       setSelectedId(null);
       setEditingTextId(null);
     }
-    
+
     if (activeTool === 'pan') return;
 
+    // Drawing tools
     if (activeTool === 'pen' || activeTool === 'highlighter') {
       setIsDrawing(true);
       setCurrentLine({
@@ -166,81 +164,75 @@ export const Canvas = () => {
         color: activeColor,
         strokeWidth: activeTool === 'highlighter' ? strokeWidth * 3 : strokeWidth,
         opacity: activeTool === 'highlighter' ? 0.4 : 1,
-        tool: activeTool,
       });
+      return;
     }
 
-    if (activeTool === 'eraser') {
-      // Find and delete element at click position
-      const stage = stageRef.current;
-      if (stage) {
-        const pos = stage.getPointerPosition();
-        if (pos) {
-          const shape = stage.getIntersection(pos);
-          if (shape && !(shape instanceof Konva.Stage)) {
-            const id = shape.id() || shape.getParent()?.id();
-            if (id) {
-              deleteElement(id);
-            }
-          }
-        }
+    // Eraser - delete clicked element
+    if (activeTool === 'eraser' && !clickedOnStage) {
+      const id = target.id() || target.getParent()?.id();
+      if (id) {
+        deleteElement(id);
+        saveToHistory();
       }
+      return;
     }
 
-    if (activeTool === 'shape' && clickedOnEmpty) {
+    // Create sticky note
+    if (activeTool === 'sticky' && clickedOnStage) {
+      addElement({
+        type: 'sticky',
+        x: pos.x - 100,
+        y: pos.y - 75,
+        width: 200,
+        height: 150,
+        props: { stickyColor, text: 'Click to edit' },
+      });
+      return;
+    }
+
+    // Create shape
+    if (activeTool === 'shape' && clickedOnStage) {
       addElement({
         type: 'shape',
         x: pos.x,
         y: pos.y,
-        width: 100,
-        height: activeShapeType === 'arrow' || activeShapeType === 'line' ? 0 : 100,
+        width: activeShapeType === 'line' || activeShapeType === 'arrow' ? 120 : 100,
+        height: activeShapeType === 'line' || activeShapeType === 'arrow' ? 0 : 100,
         props: { shapeType: activeShapeType, color: activeColor, strokeWidth },
       });
+      return;
     }
 
-    if (activeTool === 'sticky' && clickedOnEmpty) {
-      addElement({
-        type: 'sticky',
-        x: pos.x,
-        y: pos.y,
-        width: 200,
-        height: 150,
-        props: { stickyColor, text: 'Click to edit...' },
-      });
-    }
-
-    if (activeTool === 'text' && clickedOnEmpty) {
+    // Create text
+    if (activeTool === 'text' && clickedOnStage) {
       addElement({
         type: 'text',
         x: pos.x,
         y: pos.y,
-        props: { text: 'Double click to edit', fontSize, color: activeColor },
+        props: { text: 'Double-click to edit', fontSize, color: activeColor },
       });
+      return;
     }
   };
 
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (!isDrawing || !currentLine) return;
-    const pos = getCanvasPosition(e);
     
     if (activeTool === 'eraser') {
-      // Continuous erasing while dragging
+      const target = e.target;
       const stage = stageRef.current;
-      if (stage) {
-        const pos = stage.getPointerPosition();
-        if (pos) {
-          const shape = stage.getIntersection(pos);
-          if (shape && !(shape instanceof Konva.Stage)) {
-            const id = shape.id() || shape.getParent()?.id();
-            if (id) {
-              deleteElement(id);
-            }
-          }
+      if (target !== stage) {
+        const id = target.id() || target.getParent()?.id();
+        if (id) {
+          deleteElement(id);
         }
       }
-    } else {
-      setCurrentLine({ ...currentLine, points: [...currentLine.points, pos.x, pos.y] });
+      return;
     }
+
+    const pos = getCanvasPos(e);
+    setCurrentLine({ ...currentLine, points: [...currentLine.points, pos.x, pos.y] });
   };
 
   const handleMouseUp = () => {
@@ -261,9 +253,9 @@ export const Canvas = () => {
     setCurrentLine(null);
   };
 
-  const handleTextDblClick = (element: CanvasElement) => {
+  const handleTextEdit = (element: CanvasElement) => {
+    if (activeTool !== 'select') return;
     setEditingTextId(element.id);
-    setSelectedId(element.id);
     
     const stage = stageRef.current;
     if (!stage) return;
@@ -271,59 +263,55 @@ export const Canvas = () => {
     const textNode = stage.findOne('#' + element.id) as Konva.Text;
     if (!textNode) return;
     
-    const textPosition = textNode.getAbsolutePosition();
+    const textPos = textNode.getAbsolutePosition();
     const stageBox = stage.container().getBoundingClientRect();
     
     const textarea = document.createElement('textarea');
     document.body.appendChild(textarea);
     
     textarea.value = element.props.text || '';
-    textarea.style.position = 'absolute';
-    textarea.style.top = stageBox.top + textPosition.y + 'px';
-    textarea.style.left = stageBox.left + textPosition.x + 'px';
-    textarea.style.width = (textNode.width() * zoom) + 'px';
-    textarea.style.height = 'auto';
-    textarea.style.fontSize = (element.props.fontSize || 16) * zoom + 'px';
-    textarea.style.border = '2px solid hsl(217 91% 60%)';
-    textarea.style.padding = '4px';
-    textarea.style.margin = '0px';
-    textarea.style.overflow = 'hidden';
-    textarea.style.background = 'white';
-    textarea.style.outline = 'none';
-    textarea.style.resize = 'none';
-    textarea.style.fontFamily = 'Inter, sans-serif';
-    textarea.style.transformOrigin = 'left top';
-    textarea.style.color = element.props.color || '#000';
-    textarea.style.zIndex = '1000';
-    textarea.style.borderRadius = '4px';
-
+    textarea.style.cssText = `
+      position: absolute;
+      top: ${stageBox.top + textPos.y}px;
+      left: ${stageBox.left + textPos.x}px;
+      width: ${Math.max(200, (textNode.width() || 200) * zoom)}px;
+      min-height: 40px;
+      font-size: ${(element.props.fontSize || 16) * zoom}px;
+      font-family: Inter, sans-serif;
+      border: 2px solid hsl(217 91% 60%);
+      padding: 4px 8px;
+      margin: 0;
+      background: white;
+      color: ${element.props.color || '#000'};
+      outline: none;
+      resize: none;
+      z-index: 1000;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
     textarea.focus();
+    textarea.select();
 
-    const removeTextarea = () => {
+    const finish = () => {
       if (document.body.contains(textarea)) {
-        const newText = textarea.value;
-        updateElement(element.id, { props: { ...element.props, text: newText } });
+        updateElement(element.id, { props: { ...element.props, text: textarea.value } });
         document.body.removeChild(textarea);
         setEditingTextId(null);
         saveToHistory();
       }
     };
 
-    textarea.addEventListener('blur', removeTextarea);
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        removeTextarea();
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        removeTextarea();
+    textarea.addEventListener('blur', finish);
+    textarea.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' || (ev.key === 'Enter' && !ev.shiftKey)) {
+        finish();
       }
     });
   };
 
-  const handleTransformEnd = (element: CanvasElement, node: Konva.Node) => {
+  const handleTransform = (element: CanvasElement, node: Konva.Node) => {
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
-    
     node.scaleX(1);
     node.scaleY(1);
     
@@ -338,7 +326,6 @@ export const Canvas = () => {
   };
 
   const renderElement = (element: CanvasElement) => {
-    const isSelected = selectedId === element.id;
     const commonProps = {
       id: element.id,
       x: element.x,
@@ -346,19 +333,14 @@ export const Canvas = () => {
       rotation: element.rotation || 0,
       draggable: activeTool === 'select',
       onClick: () => {
-        if (activeTool === 'select') {
-          setSelectedId(element.id);
-        } else if (activeTool === 'eraser') {
-          deleteElement(element.id);
-        }
+        if (activeTool === 'select') setSelectedId(element.id);
+        if (activeTool === 'eraser') { deleteElement(element.id); saveToHistory(); }
       },
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
         updateElement(element.id, { x: e.target.x(), y: e.target.y() });
         saveToHistory();
       },
-      onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
-        handleTransformEnd(element, e.target);
-      },
+      onTransformEnd: (e: Konva.KonvaEventObject<Event>) => handleTransform(element, e.target),
     };
 
     switch (element.type) {
@@ -374,43 +356,38 @@ export const Canvas = () => {
             tension={0.5}
             lineCap="round"
             lineJoin="round"
-            globalCompositeOperation="source-over"
-            onClick={() => {
-              if (activeTool === 'eraser') {
-                deleteElement(element.id);
-              }
-            }}
+            onClick={() => activeTool === 'eraser' && deleteElement(element.id)}
           />
         );
-        
+
       case 'sticky':
         return (
-          <Group key={element.id} {...commonProps} onDblClick={() => handleTextDblClick(element)}>
+          <Group key={element.id} {...commonProps} onDblClick={() => handleTextEdit(element)}>
             <Rect
               width={element.width || 200}
               height={element.height || 150}
               fill={element.props.stickyColor}
-              cornerRadius={12}
-              shadowColor="rgba(0,0,0,0.2)"
-              shadowBlur={15}
-              shadowOpacity={0.3}
-              shadowOffsetY={5}
-              stroke={isSelected ? 'hsl(217, 91%, 60%)' : undefined}
-              strokeWidth={isSelected ? 2 : 0}
+              cornerRadius={8}
+              shadowColor="rgba(0,0,0,0.15)"
+              shadowBlur={12}
+              shadowOffsetY={4}
+              stroke={selectedId === element.id ? 'hsl(217, 91%, 60%)' : undefined}
+              strokeWidth={selectedId === element.id ? 2 : 0}
             />
             <Text
               text={element.props.text}
-              width={(element.width || 200) - 24}
-              height={(element.height || 150) - 24}
-              x={12}
-              y={12}
+              width={(element.width || 200) - 20}
+              height={(element.height || 150) - 20}
+              x={10}
+              y={10}
               fontSize={14}
               fill="#333"
               fontFamily="Inter, sans-serif"
+              wrap="word"
             />
           </Group>
         );
-        
+
       case 'text':
         return (
           <Text
@@ -421,12 +398,12 @@ export const Canvas = () => {
             fill={element.props.color}
             fontFamily="Inter, sans-serif"
             visible={editingTextId !== element.id}
-            onDblClick={() => handleTextDblClick(element)}
+            onDblClick={() => handleTextEdit(element)}
           />
         );
-        
+
       case 'image':
-        const img = images.get(element.id);
+        const img = loadedImages.get(element.id);
         if (!img) return null;
         return (
           <KonvaImage
@@ -437,9 +414,10 @@ export const Canvas = () => {
             height={element.height || 200}
           />
         );
-        
+
       case 'shape':
-        if (element.props.shapeType === 'rectangle') {
+        const shapeType = element.props.shapeType;
+        if (shapeType === 'rectangle') {
           return (
             <Rect
               key={element.id}
@@ -448,11 +426,10 @@ export const Canvas = () => {
               height={element.height || 100}
               stroke={element.props.color}
               strokeWidth={element.props.strokeWidth}
-              fill="transparent"
             />
           );
         }
-        if (element.props.shapeType === 'circle') {
+        if (shapeType === 'circle') {
           return (
             <Circle
               key={element.id}
@@ -460,11 +437,10 @@ export const Canvas = () => {
               radius={(element.width || 100) / 2}
               stroke={element.props.color}
               strokeWidth={element.props.strokeWidth}
-              fill="transparent"
             />
           );
         }
-        if (element.props.shapeType === 'arrow') {
+        if (shapeType === 'arrow') {
           return (
             <Arrow
               key={element.id}
@@ -473,11 +449,12 @@ export const Canvas = () => {
               stroke={element.props.color}
               strokeWidth={element.props.strokeWidth}
               fill={element.props.color}
-              pointerLength={10}
-              pointerWidth={10}
+              pointerLength={12}
+              pointerWidth={12}
             />
           );
         }
+        // Line
         return (
           <Line
             key={element.id}
@@ -487,7 +464,7 @@ export const Canvas = () => {
             strokeWidth={element.props.strokeWidth}
           />
         );
-        
+
       default:
         return null;
     }
@@ -498,19 +475,12 @@ export const Canvas = () => {
       case 'pan': return 'grab';
       case 'select': return 'default';
       case 'eraser': return 'crosshair';
-      case 'pen':
-      case 'highlighter':
-        return 'crosshair';
       default: return 'crosshair';
     }
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="canvas-container w-full h-full"
-      style={{ cursor: getCursor() }}
-    >
+    <div ref={containerRef} className="canvas-container w-full h-full" style={{ cursor: getCursor() }}>
       <Stage
         ref={stageRef}
         width={dimensions.width}
@@ -542,18 +512,13 @@ export const Canvas = () => {
           )}
           <Transformer
             ref={transformerRef}
-            boundBoxFunc={(oldBox, newBox) => {
-              if (newBox.width < 20 || newBox.height < 20) {
-                return oldBox;
-              }
-              return newBox;
-            }}
             rotateEnabled={true}
             enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+            boundBoxFunc={(oldBox, newBox) => (newBox.width < 20 || newBox.height < 20 ? oldBox : newBox)}
             borderStroke="hsl(217, 91%, 60%)"
             anchorFill="white"
             anchorStroke="hsl(217, 91%, 60%)"
-            anchorSize={10}
+            anchorSize={8}
             anchorCornerRadius={2}
           />
         </Layer>
