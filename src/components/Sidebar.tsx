@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Book, 
@@ -8,7 +9,8 @@ import {
   MoreHorizontal, 
   Trash2, 
   Edit2,
-  ChevronLeft
+  ChevronLeft,
+  Home
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { Button } from '@/components/ui/button';
@@ -29,6 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 
 export const Sidebar = () => {
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
   const [newPageName, setNewPageName] = useState('');
@@ -99,6 +102,19 @@ export const Sidebar = () => {
       )}
       animate={{ width: collapsed ? 60 : 280 }}
     >
+      {/* Exit Button */}
+      <div className="p-2 border-b border-border">
+        <Button
+          variant="outline"
+          size={collapsed ? "icon" : "default"}
+          className={cn("gap-2", !collapsed && "w-full")}
+          onClick={() => navigate('/')}
+        >
+          <Home className="w-4 h-4" />
+          {!collapsed && "Exit to Homepage"}
+        </Button>
+      </div>
+
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
         {!collapsed && (
