@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare,
@@ -11,6 +12,7 @@ import {
   Check,
   Pin,
   X,
+  Home,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { Button } from '@/components/ui/button';
@@ -21,6 +23,7 @@ import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
 export const RightPanel = () => {
+  const navigate = useNavigate();
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -345,6 +348,18 @@ export const RightPanel = () => {
                   </p>
                 </div>
               )}
+            </div>
+
+            {/* Exit Button */}
+            <div className="p-4 border-t border-border">
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => navigate('/')}
+              >
+                <Home className="w-4 h-4" />
+                Exit to Homepage
+              </Button>
             </div>
           </motion.div>
         )}

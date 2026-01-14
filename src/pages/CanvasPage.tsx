@@ -1,7 +1,7 @@
 import { Layout } from '@/components/Layout';
 
-const Index = () => {
+const CanvasPage = () => {
   return <Layout />;
 };
 
-export default Index;
+export default CanvasPage;
