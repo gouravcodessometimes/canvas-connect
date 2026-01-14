@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Users, 
@@ -10,6 +11,7 @@ import {
   Copy,
   Check,
   LogOut,
+  LogIn,
   UserPlus,
   MousePointer2,
   Pencil,
@@ -29,6 +31,7 @@ import {
   ZoomOut,
   Maximize2,
   Trash2,
+  User,
 } from 'lucide-react';
 import { useStore, ToolType, ShapeType } from '@/store/useStore';
 import { Button } from '@/components/ui/button';
@@ -111,11 +114,24 @@ const ToolButton = ({ icon, tool, label, onClick, isActive, disabled }: ToolButt
 };
 
 export const TopBar = () => {
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [userNameInput, setUserNameInput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [user, setUser] = useState<{ email: string } | null>(null);
+
+  // Load user from localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem('collabpad-user');
+    if (savedUser) setUser(JSON.parse(savedUser));
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('collabpad-user');
+    setUser(null);
+  };
 
   const {
     darkMode,
@@ -582,6 +598,32 @@ export const TopBar = () => {
             {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </motion.div>
         </Button>
+
+        {/* User Auth */}
+        {user ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <User className="w-4 h-4" />
+                <span className="max-w-[100px] truncate text-xs">{user.email}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48">
+              <div className="space-y-2">
+                <p className="text-sm font-medium truncate">{user.email}</p>
+                <Button variant="destructive" size="sm" className="w-full" onClick={handleLogout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate('/auth')}>
+            <LogIn className="w-4 h-4" />
+            Sign In
+          </Button>
+        )}
       </div>
     </div>
   );
